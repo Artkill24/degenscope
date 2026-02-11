@@ -1,0 +1,75 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-degenscope}
+      POSTGRES_USER: ${POSTGRES_USER:-degenscope}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-degenscope}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  scanner-api:
+    build: ./scanner-api
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-degenscope}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-degenscope}
+      REDIS_URL: redis://redis:6379
+      ETHERSCAN_API_KEY: ${ETHERSCAN_API_KEY}
+      ALCHEMY_API_KEY: ${ALCHEMY_API_KEY}
+      ANALYZER_URL: http://analyzer:8001
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  analyzer:
+    build: ./analyzer
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-degenscope}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-degenscope}
+      REDIS_URL: redis://redis:6379
+      ALCHEMY_API_KEY: ${ALCHEMY_API_KEY}
+      PORT: 8001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  dashboard:
+    build: ./dashboard
+    environment:
+      VITE_API_URL: ${API_URL:-http://localhost:8000}
+    ports:
+      - "3000:80"
+    depends_on:
+      - scanner-api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
